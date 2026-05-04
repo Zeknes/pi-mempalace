@@ -1,135 +1,52 @@
 /**
- * Embedding generation using @huggingface/transformers.
+ * Embedding generation using Ollama API.
  *
- * Wraps the all-MiniLM-L6-v2 model for generating 384-dimensional
- * semantic embeddings. Uses ONNX runtime for efficient inference.
+ * Wraps the Ollama /api/embed endpoint for generating semantic embeddings.
+ * Replaces the original @huggingface/transformers implementation with
+ * a lightweight HTTP-based approach.
  *
- * Compatible with @huggingface/transformers v4.x.
+ * Default model: nomic-embed-text-v2-moe (768 dimensions)
  */
 
-import { pipeline, env } from "@huggingface/transformers";
-import type { FeatureExtractionPipeline } from "@huggingface/transformers";
-import { logger } from "./logger";
 import { EMBEDDING_CONFIG, type Embedding } from "./types";
-
-// Configure transformers for optimal performance
-env.allowLocalModels = false;
-env.useBrowserCache = false;
-
-// Set up WASM threading
-if (env.backends?.onnx?.wasm) {
-	env.backends.onnx.wasm.numThreads = 4;
-}
-
-/** Singleton embedding pipeline instance. */
-let embeddingPipeline: FeatureExtractionPipeline | null = null;
-
-/** Whether the pipeline is currently loading. */
-let isLoading = false;
+import { logger } from "./logger";
 
 /**
- * Get or create the embedding pipeline.
+ * Generate an embedding vector for the given text via Ollama.
  *
- * The pipeline is lazily initialized on first use and cached
- * for subsequent calls.
- */
-async function getPipeline(): Promise<FeatureExtractionPipeline> {
-	if (embeddingPipeline) {
-		return embeddingPipeline;
-	}
-
-	if (isLoading) {
-		// Wait for existing load to complete
-		while (isLoading) {
-			await new Promise(resolve => setTimeout(resolve, 100));
-		}
-		if (embeddingPipeline) {
-			return embeddingPipeline;
-		}
-	}
-
-	isLoading = true;
-	logger.debug("Loading embedding model", { model: EMBEDDING_CONFIG.MODEL });
-
-	try {
-		embeddingPipeline = (await pipeline("feature-extraction", EMBEDDING_CONFIG.MODEL, {
-			device: EMBEDDING_CONFIG.DEVICE as "cpu" | "cuda",
-		})) as FeatureExtractionPipeline;
-
-		logger.info("Embedding model loaded", {
-			model: EMBEDDING_CONFIG.MODEL,
-			dimension: EMBEDDING_CONFIG.DIMENSION,
-		});
-	} finally {
-		isLoading = false;
-	}
-
-	return embeddingPipeline!;
-}
-
-/**
- * Generate an embedding vector for the given text.
- *
- * Uses all-MiniLM-L6-v2 to produce a 384-dimensional vector
- * representing the semantic meaning of the input text.
- *
- * @param text - The text to embed. Will be truncated if too long.
- * @returns Promise resolving to a 384-dimensional Float32Array.
- * @throws Error if embedding generation fails.
- *
- * @example
- * ```typescript
- * const embedding = await embed("The quick brown fox jumps over the lazy dog");
- * console.log(`Got ${embedding.length}-dimensional embedding`);
- * ```
+ * @param text - The text to embed.
+ * @returns Promise resolving to a 768-dimensional Float32Array.
+ * @throws Error if Ollama is unreachable or embedding fails.
  */
 export async function embed(text: string): Promise<Embedding> {
-	const pipe = await getPipeline();
-
-	// Truncate text if too long (approximate token limit)
-	const truncatedText = truncateText(text, EMBEDDING_CONFIG.MAX_LENGTH);
-
 	const startTime = performance.now();
 
-	const output = await pipe(truncatedText, {
-		pooling: "mean",
-		normalize: true,
+	const response = await fetch(`${EMBEDDING_CONFIG.OLLAMA_URL}/api/embed`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			model: EMBEDDING_CONFIG.MODEL,
+			input: text,
+		}),
 	});
+
+	if (!response.ok) {
+		throw new Error(
+			`Ollama embed API error: ${response.status} ${response.statusText}`,
+		);
+	}
+
+	const data = (await response.json()) as {
+		embeddings: number[][];
+	};
 
 	const duration = performance.now() - startTime;
 
-	// Convert tensor to Float32Array
-	// The output from pooling='mean' should be [1, 384]
-	const dims = output.dims;
-
-	let embedding: Float32Array;
-
-	if (dims.length === 2 && dims[0] === 1) {
-		// Already pooled: [batch, hidden]
-		const data = output.data;
-		if (data instanceof Float32Array) {
-			embedding = data;
-		} else {
-			embedding = new Float32Array(data as ArrayLike<number>);
-		}
-	} else if (dims.length === 3) {
-		// Not pooled: [batch, sequence, hidden] - need to mean pool
-		const data = output.data;
-		const typedData = data instanceof Float32Array ? data : new Float32Array(data as ArrayLike<number>);
-		embedding = new Float32Array(EMBEDDING_CONFIG.DIMENSION);
-
-		// Mean pool across sequence dimension
-		const seqLen = dims[1];
-		for (let i = 0; i < EMBEDDING_CONFIG.DIMENSION; i++) {
-			let sum = 0;
-			for (let j = 0; j < seqLen; j++) {
-				sum += typedData[j * EMBEDDING_CONFIG.DIMENSION + i];
-			}
-			embedding[i] = sum / seqLen;
-		}
-	} else {
-		throw new Error(`Unexpected output shape: [${dims.join(",")}]`);
+	if (!data.embeddings || data.embeddings.length === 0) {
+		throw new Error("Ollama returned empty embeddings");
 	}
+
+	const embedding = new Float32Array(data.embeddings[0]);
 
 	// Validate dimension
 	if (embedding.length !== EMBEDDING_CONFIG.DIMENSION) {
@@ -137,14 +54,13 @@ export async function embed(text: string): Promise<Embedding> {
 			expected: EMBEDDING_CONFIG.DIMENSION,
 			actual: embedding.length,
 		});
-
 		// Resize if necessary
 		if (embedding.length > EMBEDDING_CONFIG.DIMENSION) {
-			embedding = embedding.slice(0, EMBEDDING_CONFIG.DIMENSION);
+			return embedding.slice(0, EMBEDDING_CONFIG.DIMENSION);
 		} else {
 			const padded = new Float32Array(EMBEDDING_CONFIG.DIMENSION);
 			padded.set(embedding);
-			embedding = padded;
+			return padded;
 		}
 	}
 
@@ -157,64 +73,48 @@ export async function embed(text: string): Promise<Embedding> {
 }
 
 /**
- * Generate embeddings for multiple texts in batch.
- * Processes one at a time to keep only one inference's tensors in memory.
+ * Generate embeddings for multiple texts in batch via Ollama.
+ * Ollama's /api/embed accepts an array of inputs natively.
  *
  * @param texts - Array of texts to embed.
  * @returns Promise resolving to array of embeddings.
  */
 export async function embedBatch(texts: string[]): Promise<Embedding[]> {
-	const pipe = await getPipeline();
 	const startTime = performance.now();
 
-	const embeddings: Embedding[] = [];
+	const response = await fetch(`${EMBEDDING_CONFIG.OLLAMA_URL}/api/embed`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			model: EMBEDDING_CONFIG.MODEL,
+			input: texts,
+		}),
+	});
 
-	for (const text of texts) {
-		const truncatedText = truncateText(text, EMBEDDING_CONFIG.MAX_LENGTH);
+	if (!response.ok) {
+		throw new Error(
+			`Ollama embed API error: ${response.status} ${response.statusText}`,
+		);
+	}
 
-		const output = await pipe(truncatedText, {
-			pooling: "mean",
-			normalize: true,
-		});
+	const data = (await response.json()) as {
+		embeddings: number[][];
+	};
 
-		const dims = output.dims;
-		let embedding: Float32Array;
-
-		if (dims.length === 2 && dims[0] === 1) {
-			const data = output.data;
-			if (data instanceof Float32Array) {
-				embedding = data;
-			} else {
-				embedding = new Float32Array(data as ArrayLike<number>);
-			}
-		} else {
-			// Mean pool if needed
-			const data = output.data;
-			const typedData = data instanceof Float32Array ? data : new Float32Array(data as ArrayLike<number>);
-			embedding = new Float32Array(EMBEDDING_CONFIG.DIMENSION);
-			const seqLen = dims[1];
-			for (let i = 0; i < EMBEDDING_CONFIG.DIMENSION; i++) {
-				let sum = 0;
-				for (let j = 0; j < seqLen; j++) {
-					sum += typedData[j * EMBEDDING_CONFIG.DIMENSION + i];
-				}
-				embedding[i] = sum / seqLen;
-			}
-		}
-
-		// Normalize to expected dimension
+	const embeddings: Embedding[] = data.embeddings.map((vec) => {
+		const embedding = new Float32Array(vec);
+		// Resize if dimension doesn't match
 		if (embedding.length !== EMBEDDING_CONFIG.DIMENSION) {
 			if (embedding.length > EMBEDDING_CONFIG.DIMENSION) {
-				embedding = embedding.slice(0, EMBEDDING_CONFIG.DIMENSION);
+				return embedding.slice(0, EMBEDDING_CONFIG.DIMENSION);
 			} else {
 				const padded = new Float32Array(EMBEDDING_CONFIG.DIMENSION);
 				padded.set(embedding);
-				embedding = padded;
+				return padded;
 			}
 		}
-
-		embeddings.push(embedding);
-	}
+		return embedding;
+	});
 
 	const duration = performance.now() - startTime;
 
@@ -227,55 +127,15 @@ export async function embedBatch(texts: string[]): Promise<Embedding[]> {
 }
 
 /**
- * Check if the embedding pipeline is ready.
+ * Check if embedding is ready (Ollama is always "ready" if reachable).
  */
 export function isEmbedReady(): boolean {
-	return embeddingPipeline !== null;
+	return true;
 }
 
 /**
- * Unload the embedding pipeline to free memory.
+ * No-op — Ollama manages its own model lifecycle.
  */
 export async function unloadEmbed(): Promise<void> {
-	if (embeddingPipeline) {
-		logger.debug("Unloading embedding model");
-		// Dispose the pipeline
-		if (typeof (embeddingPipeline as { dispose?: () => void }).dispose === "function") {
-			(embeddingPipeline as { dispose: () => void }).dispose();
-		}
-		embeddingPipeline = null;
-		logger.info("Embedding model unloaded");
-	}
-}
-
-/**
- * Truncate text to a maximum length.
- *
- * Simple character-based truncation with ellipsis.
- * For production, consider token-based truncation.
- */
-function truncateText(text: string, maxLength: number): string {
-	if (text.length <= maxLength) {
-		return text;
-	}
-
-	// Find a good break point (end of sentence or word)
-	const truncated = text.slice(0, maxLength);
-	const lastSentence = truncated.lastIndexOf(".");
-	const lastSpace = truncated.lastIndexOf(" ");
-
-	const breakPoint =
-		lastSentence > maxLength * 0.7 ? lastSentence + 1 : lastSpace > maxLength * 0.7 ? lastSpace : maxLength;
-
-	return text.slice(0, breakPoint);
-}
-
-/**
- * Validate that an embedding has the correct dimension.
- *
- * @param embedding - The embedding to validate.
- * @returns True if the embedding has the expected dimension.
- */
-export function validateEmbedding(embedding: Embedding): boolean {
-	return embedding.length === EMBEDDING_CONFIG.DIMENSION;
+	logger.debug("unloadEmbed: no-op for Ollama backend");
 }

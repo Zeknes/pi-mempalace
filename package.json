@@ -1,19 +1,19 @@
 {
 	"type": "module",
-	"name": "@sinamtz/pi-mempalace",
-	"version": "0.2.7",
-	"description": "hasslefree and self-contained mempalace port for pi-coding-agent with SurrealDB-backed vector search, layered retrieval, and multi-process auto-server runtime",
-	"homepage": "https://github.com/sinamtz/pi-mempalace#readme",
+	"name": "@zek/pi-mempalace-ollama",
+	"version": "0.3.0",
+	"description": "Mempalace fork using Ollama for embeddings — nomic-embed-text-v2-moe (768d) with full Chinese/English support. SurrealDB-backed vector search, layered retrieval, and multi-process auto-server.",
+	"homepage": "https://github.com/Zeknes/pi-mempalace#readme",
 	"author": {
 		"name": "Sina Montazeri"
 	},
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/sinamtz/pi-mempalace.git"
+		"url": "git+https://github.com/Zeknes/pi-mempalace.git"
 	},
 	"bugs": {
-		"url": "https://github.com/sinamtz/pi-mempalace/issues"
+		"url": "https://github.com/Zeknes/pi-mempalace/issues"
 	},
 	"keywords": [
 		"pi-package",
@@ -44,7 +44,6 @@
 		"test:all": "vitest run && node test/singleton-crossprocess.ts"
 	},
 	"dependencies": {
-		"@huggingface/transformers": "^4.0.1",
 		"@sinclair/typebox": "^0.34.49",
 		"ignore": "^7.0.5",
 		"surrealdb": "^2.0.3",

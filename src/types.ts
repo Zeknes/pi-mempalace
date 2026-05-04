@@ -7,7 +7,7 @@
 
 import type { RecordId } from "surrealdb";
 
-/** A 384-dimensional embedding vector (all-MiniLM-L6-v2 output). */
+/** A 768-dimensional embedding vector (nomic-embed-text-v2-moe via Ollama). */
 export type Embedding = Float32Array;
 
 /** Unique identifier for a memory record. */
@@ -27,7 +27,7 @@ export interface Memory {
 	id: MemoryId;
 	/** The raw text content of this memory. */
 	text: string;
-	/** 384-dimensional embedding vector (all-MiniLM-L6-v2). */
+	/** 768-dimensional embedding vector (nomic-embed-text-v2-moe via Ollama). */
 	embedding: Embedding;
 	/** Wing identifier — high-level spatial division of the palace. */
 	wing: string;
@@ -163,8 +163,8 @@ export interface QueryOptions {
 
 /** HNSW index parameters for embedding field. */
 export const HNSW_CONFIG = {
-	/** Embedding dimension (all-MiniLM-L6-v2). */
-	DIMENSION: 384,
+	/** Embedding dimension (nomic-embed-text-v2-moe). */
+	DIMENSION: 768,
 	/** Distance metric. */
 	DISTANCE: "COSINE" as const,
 	/** Maximum number of elements in the dynamic candidate list. */
@@ -173,16 +173,16 @@ export const HNSW_CONFIG = {
 	M: 16,
 } as const;
 
-/** Configuration for the embedding model. */
+/** Configuration for the Ollama embedding model. */
 export const EMBEDDING_CONFIG = {
-	/** Model identifier for all-MiniLM-L6-v2. */
-	MODEL: "Xenova/all-MiniLM-L6-v2",
+	/** Ollama model name. */
+	MODEL: "nomic-embed-text-v2-moe",
+	/** Ollama API endpoint. */
+	OLLAMA_URL: "http://localhost:11434",
 	/** Expected embedding dimension. */
-	DIMENSION: 384,
-	/** Device to use for inference ("cpu" or "cuda"). */
-	DEVICE: "cpu",
-	/** Maximum text length in tokens (approximate). */
-	MAX_LENGTH: 256,
+	DIMENSION: 768,
+	/** Maximum text length in characters (Ollama handles tokenization). */
+	MAX_LENGTH: 8192,
 } as const;
 
 /** Default paths for MemPalace data storage. */
