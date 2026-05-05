@@ -229,7 +229,7 @@ export async function connectDb(options?: { dataDir?: string }): Promise<Surreal
 		DEFINE FIELD IF NOT EXISTS source ON memory TYPE string;
 		DEFINE FIELD IF NOT EXISTS timestamp ON memory TYPE option<datetime> DEFAULT NONE;
 		DEFINE INDEX IF NOT EXISTS mt_idx ON memory FIELDS embedding HNSW
-			DIMENSION 384 DIST COSINE EFC 150 M 16;
+			DIMENSION 768 DIST COSINE EFC 150 M 16;
 
 		DEFINE TABLE IF NOT EXISTS person SCHEMAFULL;
 		DEFINE FIELD IF NOT EXISTS name ON person TYPE string;

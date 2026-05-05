@@ -36,7 +36,7 @@ function toMemory(record: unknown): Memory {
 	return {
 		id: String(r.id),
 		text: r.text ?? "",
-		embedding: r.embedding ? fromSurrealArray(r.embedding) : new Float32Array(384),
+		embedding: r.embedding ? fromSurrealArray(r.embedding) : new Float32Array(768),
 		wing: r.wing ?? "",
 		room: r.room ?? "",
 		source: r.source ?? "",

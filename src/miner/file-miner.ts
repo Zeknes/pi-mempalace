@@ -159,7 +159,6 @@ export async function mineDirectory(options: FileMinerOptions): Promise<FileMini
 		dirSkipped: result.filesSkipped,
 	});
 
-
 	// Process files in batches
 	for (let i = 0; i < files.length; i += batchSize) {
 		const batch = files.slice(i, i + batchSize);
@@ -182,7 +181,7 @@ export async function mineDirectory(options: FileMinerOptions): Promise<FileMini
 				for (const chunk of chunks) {
 					batchMemories.push({
 						text: chunk.text,
-						embedding: new Float32Array(384), // Placeholder, will be replaced
+						embedding: new Float32Array(768), // Placeholder, will be replaced
 						wing: wingAssignment,
 						room: roomDetection.room,
 						source: fileSource,
@@ -280,12 +279,12 @@ async function scanDirectory(
 		for (const entry of entries) {
 			const fullPath = path.join(currentDir, entry.name);
 			const relativePath = path.relative(rootDir, fullPath);
-		// Check if this entry should be ignored (handles both files and directories)
-		// Add trailing slash for directories so ignore patterns like 'node_modules/' match
-		const ignorePath = entry.isDirectory() ? relativePath + "/" : relativePath;
-		if (ig.ignores(ignorePath)) {
-			continue;
-		}
+			// Check if this entry should be ignored (handles both files and directories)
+			// Add trailing slash for directories so ignore patterns like 'node_modules/' match
+			const ignorePath = entry.isDirectory() ? relativePath + "/" : relativePath;
+			if (ig.ignores(ignorePath)) {
+				continue;
+			}
 
 			// Handle directories
 			if (entry.isDirectory()) {
